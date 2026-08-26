@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,6 +41,11 @@ import (
 type ServeOptions struct {
 	SecureServing  *genericoptions.SecureServingOptions
 	Authentication *kubeoptions.BuiltInAuthenticationOptions
+
+	// OAuth optionally serves RFC 9728 protected-resource metadata and
+	// WWW-Authenticate hints so MCP clients can discover the authorization
+	// server on their own.
+	OAuth OAuthOptions
 
 	// Access resolves which workspaces a caller may use.
 	Access *access.Client
@@ -83,6 +89,16 @@ func Serve(ctx context.Context, opts ServeOptions) error {
 	}
 	if err := applyAuthentication(ctx, opts.Authentication, &recommended.Config); err != nil {
 		return err
+	}
+
+	// the well-known metadata must answer before the
+	// authentication filters run, and the 401 hint must decorate whatever
+	// the chain produces.
+	if opts.OAuth.Enabled() {
+		oauth := opts.OAuth
+		recommended.Config.BuildHandlerChainFunc = func(apiHandler http.Handler, c *genericapiserver.Config) http.Handler {
+			return WithOAuthProtectedResource(genericapiserver.DefaultBuildHandlerChain(apiHandler, c), oauth)
+		}
 	}
 
 	vw := NewVirtualWorkspace(opts.Access, opts.Impersonator, opts.Toolsets)
