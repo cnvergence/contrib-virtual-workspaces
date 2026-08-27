@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -91,16 +90,6 @@ func Serve(ctx context.Context, opts ServeOptions) error {
 		return err
 	}
 
-	// the well-known metadata must answer before the
-	// authentication filters run, and the 401 hint must decorate whatever
-	// the chain produces.
-	if opts.OAuth.Enabled() {
-		oauth := opts.OAuth
-		recommended.Config.BuildHandlerChainFunc = func(apiHandler http.Handler, c *genericapiserver.Config) http.Handler {
-			return WithOAuthProtectedResource(genericapiserver.DefaultBuildHandlerChain(apiHandler, c), oauth)
-		}
-	}
-
 	vw := NewVirtualWorkspace(opts.Access, opts.Impersonator, opts.Toolsets)
 	vws := []rootapiserver.NamedVirtualWorkspace{vw}
 
@@ -117,6 +106,15 @@ func Serve(ctx context.Context, opts ServeOptions) error {
 	server, err := rootapiserver.NewServer(rootCfg.Complete(), genericapiserver.NewEmptyDelegate())
 	if err != nil {
 		return fmt.Errorf("building root apiserver: %w", err)
+	}
+
+	// Wrapped after construction, not via BuildHandlerChainFunc, because the
+	// framework overwrites that hook in NewServer. Outermost on purpose: the
+	// well-known metadata must answer before the authentication filters run,
+	// and the 401 hint must decorate whatever the chain produces.
+	if opts.OAuth.Enabled() {
+		handler := server.GenericAPIServer.Handler
+		handler.FullHandlerChain = WithOAuthProtectedResource(handler.FullHandlerChain, opts.OAuth)
 	}
 
 	return server.GenericAPIServer.PrepareRun().RunWithContext(ctx)

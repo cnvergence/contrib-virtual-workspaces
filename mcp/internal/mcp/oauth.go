@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"k8s.io/apiserver/pkg/endpoints/responsewriter"
 )
 
 // WellKnownProtectedResource is the RFC 9728 well-known prefix under which
@@ -122,7 +124,11 @@ func WithOAuthProtectedResource(handler http.Handler, o OAuthOptions) http.Handl
 		}
 
 		if mcpPath {
-			handler.ServeHTTP(&challengeInjector{ResponseWriter: w, opts: o, req: r}, r)
+			// WrapForHTTP1Or2 keeps the writer's CloseNotifier/Flusher/
+			// Hijacker surface intact; downstream filters and the MCP SDK
+			// type-assert these and panic on a bare decorator.
+			injector := responsewriter.WrapForHTTP1Or2(&challengeInjector{ResponseWriter: w, opts: o, req: r})
+			handler.ServeHTTP(injector, r)
 			return
 		}
 		handler.ServeHTTP(w, r)
@@ -153,7 +159,7 @@ func (c *challengeInjector) Flush() {
 	}
 }
 
-// Unwrap supports http.ResponseController pass-through.
+// Unwrap returns the inner writer, satisfying responsewriter.UserProvidedDecorator.
 func (c *challengeInjector) Unwrap() http.ResponseWriter {
 	return c.ResponseWriter
 }
