@@ -89,7 +89,10 @@ func (o OAuthOptions) serveMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	_ = json.NewEncoder(w).Encode(md)
+	err := json.NewEncoder(w).Encode(md)
+	if err != nil {
+		http.Error(w, "failed to encode metadata", http.StatusInternalServerError)
+	}
 }
 
 func (o OAuthOptions) challenge(w http.ResponseWriter, r *http.Request) {
